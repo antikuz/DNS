@@ -90,7 +90,7 @@ class SQLdb():
         return objects
 
     def insert_promo(self, promo):
-        self.cursor.execute('INSERT OR REPLACE INTO promo VALUES(?,?,?,?,?)', promo)
+        self.cursor.execute('INSERT OR REPLACE INTO promo VALUES(?,?,?,?,?,?)', promo)
         self.insbonus += self.cursor.rowcount
         self.db.commit()
     
