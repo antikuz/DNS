@@ -4,8 +4,6 @@ from zipfile import ZipFile
 import sqlite3
 import xlrd
 from DNSsql import SQLdb
-import csv
-
 
 HOME = os.path.dirname(os.path.realpath(__file__))
 
@@ -45,8 +43,8 @@ def get_file():
         return False
 
 def parse_xls_sheet(db, sheet, update_time):
-    products = []
-    price_history = []
+    products = dict()
+    price_history = dict()
     for row in range(sheet.nrows):
         product_id = sheet.cell(row, 0).value
 
@@ -63,38 +61,40 @@ def parse_xls_sheet(db, sheet, update_time):
         product_price = int(sheet.cell(row, 6).value)
         product_bonuses = int(sheet.cell(row, 7).value)
         product_promo_bonuses = 0
-        products.append((
-            product_id, 
-            product_name, 
-            available_in_stores, 
-            product_price, 
-            product_bonuses,
-            product_promo_bonuses, 
-            update_time
-        ))
+        products[product_id] = {
+            'name': product_name, 
+            'available': available_in_stores, 
+            'price': product_price, 
+            'bonus': product_bonuses,
+            'bonus_promo': product_promo_bonuses, 
+            'update_time': update_time
+        }
 
         if len(products) == 100:
-            db_records = db.price_comparison([x[0] for x in products])
-            for product in list(products):
-                new_id = product[0]
-
+            old_products = db.price_comparison([product_id for product_id in products])
+            for product_id in list(products):
                 try:
-                    old_product = db_records[new_id]
-                    new_price, new_bonus = product[3], product[4]
-                    old_price, old_bonus = old_product[0], old_product[1]
+                    new_price = products[product_id]['price']
+                    new_bonus = products[product_id]['bonus']
+                    old_price = old_products[product_id]['price']
+                    old_bonus = old_products[product_id]['bonus']
+
                     if new_price != old_price or new_bonus != old_bonus:
                         if new_price != old_price:
-                            price_history.append(product)
+                            price_history[product_id] = products[product_id]
                         continue
                     else:
-                        products.remove(product)
+                        del products[product_id]
                 except KeyError:
                     continue
 
-            if len(products) > 0:
-                db.insert_products(products, price_history)
-                products = []
-                price_history = []
+            db.insert_products(products, price_history)
+            products = dict()
+            price_history = dict()
+    
+    if len(products) > 0:
+        db.insert_products(products, price_history)
+        
 
 def parse_xls_book():
     with xlrd.open_workbook(filename = f'{HOME}\\price-norilsk.xls', logfile=open(os.devnull, 'w')) as wb:
@@ -109,6 +109,20 @@ def parse_xls_book():
         finally:
             db.close_db()
 
+def best_offers():
+    with SQLdb() as db:
+        best_price = []
+        products = db.get_products_with_bonuses()
+        for product in products:
+            bonus = product[2] + product[3]
+            discount_percent = bonus // (product[1] / 100)
+            if discount_percent > 24:
+                best_price.append((product[0], product[1], bonus,discount_percent))
+        with open('temp\\result.csv', 'w') as fh:
+            fh.write('sep=;\n')
+            for product in (sorted(best_price, key = lambda x: x[3]))[::-1]:
+                fh.write('{};{};{};{};\n'.format(*product))
+
 def main():
     if get_file():
         print('Get new database from dns-shop, parse data')
@@ -119,19 +133,4 @@ def main():
         """
         pass
 
-db = SQLdb()
-try:
-    best_price = []
-    products = db.get_products_with_bonuses()
-    for product in products:
-        bonus = product[2] + product[3]
-        discount_percent = bonus // (product[1] / 100)
-        if discount_percent > 24:
-            best_price.append((product[0], product[1], bonus,discount_percent))
-    with open('result.csv', 'w') as fh:
-        writer = csv.writer(fh, delimiter=';')
-        writer.writerow('sep=;')
-        for product in (sorted(best_price, key = lambda x: x[3]))[::-1]:
-            writer.writerow(product)
-finally:
-    db.close_db()
+parse_xls_book()
