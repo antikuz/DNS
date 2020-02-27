@@ -1,17 +1,16 @@
 import os
 import sqlite3
-
+import logging
+import time
 
 class SQLdb():
     def __init__(self):
         dbfile = f'{os.path.dirname(os.path.realpath(__file__))}\\DNSdb.sqlite'
         if os.path.exists(dbfile):
             self.db = sqlite3.connect(dbfile)
-            self.db.execute("PRAGMA foreign_keys = ON")
             self.cursor = self.db.cursor()
         else:
             self.db = sqlite3.connect(dbfile)
-            self.db.execute("PRAGMA foreign_keys = ON")
             self.cursor = self.db.cursor()
             self.cursor.execute('''CREATE TABLE products(
                 id INTEGER PRIMARY KEY, 
@@ -26,12 +25,11 @@ class SQLdb():
             self.cursor.execute('''CREATE TABLE price_history(
                 id_product INTEGER,
                 price INTEGER,
-                up_date TEXT,
-                FOREIGN KEY(id_product) REFERENCES products(id) ON DELETE CASCADE
+                up_date TEXT
                 )'''
             )
             self.cursor.execute('''CREATE TABLE promo(
-                id TEXT,
+                id TEXT PRIMARY KEY,
                 name TEXT,
                 description TEXT,
                 start_date TEXT,
@@ -47,16 +45,14 @@ class SQLdb():
 
     def close_db(self):
         self.db.close()
-        text = []
         if self.inscount:
-            text.append(f'We have inserted {self.inscount} product records')
+            logging.info(f'We have inserted {self.inscount} product records')
         if self.histcount:
-            text.append(f'We have inserted {self.histcount} price history records')
+            logging.info(f'We have inserted {self.histcount} price history records')
         if self.insbonus:
-            text.append(f'We have inserted {self.insbonus} promo records')
+            logging.info(f'We have inserted {self.insbonus} promo records')
         if self.promocount:
-            text.append(f'We have updated {self.promocount} promo bonus records')
-        print('\n'.join(text))
+            logging.info(f'We have updated {self.promocount} promo bonus records')
 
     def insert_products(self, product_list, price_history):
         products = []
@@ -73,7 +69,7 @@ class SQLdb():
         self.inscount += self.cursor.rowcount
 
         price_history = [(x, price_history[x]['price'], price_history[x]['update_time']) for x in price_history]
-        self.cursor.executemany('INSERT OR REPLACE INTO price_history VALUES(?,?,?)', price_history)
+        self.cursor.executemany('INSERT INTO price_history (id_product,price,up_date) VALUES(?,?,?)', price_history)
         self.histcount += self.cursor.rowcount
         self.db.commit()
     
@@ -90,10 +86,11 @@ class SQLdb():
         return objects
 
     def insert_promo(self, promo):
+        self.clean_promo()
         self.cursor.execute('INSERT OR REPLACE INTO promo VALUES(?,?,?,?,?,?)', promo)
         self.insbonus += self.cursor.rowcount
         self.db.commit()
-    
+
     def update_promo(self, products):
         for product in products:
             self.cursor.execute(f'UPDATE products SET bonus_promo = {int(product[1])} WHERE id = "{product[0]}"')
@@ -109,6 +106,19 @@ class SQLdb():
         promotions = self.cursor.fetchall()
         promotions = [x[0] for x in promotions]
         return promotions
+
+    def clean_promo(self):
+        data = time.strftime('%y.%m.%d', time.localtime())
+        self.cursor.execute(f'SELECT id, products FROM promo WHERE expires_date < "{data}"')
+        expire_promo = self.cursor.fetchall()
+        if not expire_promo:
+            return
+        for _id, products in zip(*expire_promo):
+            products = products.split(',')
+            if products:
+                self.cursor.execute(f'UPDATE products SET bonus_promo = 0 WHERE id in ({",".join(products)})')
+            self.cursor.execute(f'DELETE FROM promo WHERE id = "{_id}"')
+            self.db.commit()
 
     def __enter__(self):
         return self
