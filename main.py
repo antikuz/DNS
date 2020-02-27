@@ -1,11 +1,21 @@
 import requests
-import os, time, shutil
+import os, logging, time, shutil
 from zipfile import ZipFile
 import sqlite3
 import xlrd
 from DNSsql import SQLdb
 
 HOME = os.path.dirname(os.path.realpath(__file__))
+logging.basicConfig(level=logging.DEBUG,
+                    filename=f'{HOME}\\temp\\out.txt',
+                    format='%(asctime)s %(name)-6s %(levelname)-8s %(message)s',
+                    datefmt='%y-%m-%d %H:%M:%S')
+console = logging.StreamHandler()
+console.setLevel(logging.INFO)
+formatter = logging.Formatter('%(name)-6s: %(levelname)-8s %(message)s')
+console.setFormatter(formatter)
+logging.getLogger('').addHandler(console)
+
 
 def get_file():
     url = r'https://www.dns-shop.ru/files/price/price-norilsk.zip'
@@ -39,12 +49,37 @@ def get_file():
         os.utime(f'{HOME}\\price-norilsk.zip', (time_new_file, time_new_file))
         return True
     else:
-        print('Nothing changes')
         return False
+
+
+def insert_diff_product(db, products):
+    """
+    Check products price in base and if different replace them and insert in price history
+    """
+    price_history = dict()
+    old_products = db.price_comparison([product_id for product_id in products])
+    for product_id in list(products):
+        try:
+            new_price = products[product_id]['price']
+            new_bonus = products[product_id]['bonus']
+            old_price = old_products[product_id]['price']
+            old_bonus = old_products[product_id]['bonus']
+
+            if new_price != old_price or new_bonus != old_bonus:
+                if new_price != old_price:
+                    price_history[product_id] = products[product_id]
+                continue
+            else:
+                del products[product_id]
+        except KeyError:
+            price_history[product_id] = products[product_id]
+            continue
+
+    db.insert_products(products, price_history)
+
 
 def parse_xls_sheet(db, sheet, update_time):
     products = dict()
-    price_history = dict()
     for row in range(sheet.nrows):
         product_id = sheet.cell(row, 0).value
 
@@ -71,30 +106,12 @@ def parse_xls_sheet(db, sheet, update_time):
         }
 
         if len(products) == 100:
-            old_products = db.price_comparison([product_id for product_id in products])
-            for product_id in list(products):
-                try:
-                    new_price = products[product_id]['price']
-                    new_bonus = products[product_id]['bonus']
-                    old_price = old_products[product_id]['price']
-                    old_bonus = old_products[product_id]['bonus']
-
-                    if new_price != old_price or new_bonus != old_bonus:
-                        if new_price != old_price:
-                            price_history[product_id] = products[product_id]
-                        continue
-                    else:
-                        del products[product_id]
-                except KeyError:
-                    continue
-
-            db.insert_products(products, price_history)
+            insert_diff_product(db, products)
             products = dict()
-            price_history = dict()
-    
+            
     if len(products) > 0:
-        db.insert_products(products, price_history)
-        
+        insert_diff_product(db, products) 
+
 
 def parse_xls_book():
     with xlrd.open_workbook(filename = f'{HOME}\\price-norilsk.xls', logfile=open(os.devnull, 'w')) as wb:
@@ -109,28 +126,40 @@ def parse_xls_book():
         finally:
             db.close_db()
 
-def best_offers():
+
+def best_offers(min_profit=None):
+    if min_profit is None:
+        min_profit = 24
     with SQLdb() as db:
         best_price = []
         products = db.get_products_with_bonuses()
         for product in products:
             bonus = product[2] + product[3]
             discount_percent = bonus // (product[1] / 100)
-            if discount_percent > 24:
+            if discount_percent > min_profit:
                 best_price.append((product[0], product[1], bonus,discount_percent))
         with open('temp\\result.csv', 'w') as fh:
             fh.write('sep=;\n')
+            fh.write('Товар;Цена;Бонусы;Скидка\n')
             for product in (sorted(best_price, key = lambda x: x[3]))[::-1]:
                 fh.write('{};{};{};{};\n'.format(*product))
 
-def main():
-    if get_file():
-        print('Get new database from dns-shop, parse data')
-        parse_xls_book()
-    else:
-        """
-        wait for next check, probably 1 hour
-        """
-        pass
 
-parse_xls_book()
+def main():
+    try:
+
+        if get_file():
+            logging.info('Get new database from dns-shop, parse data')
+            parse_xls_book()
+        else:
+            best_offers(min_profit=10)
+            logging.info('New file nothing changes')
+            """
+            wait for next check, probably 1 hour
+            """
+            pass
+    except Exception as err:
+        logging.error(err)
+
+
+main()
