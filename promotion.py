@@ -133,5 +133,4 @@ def main():
             db.update_promo(products_update)
 
 
-
 main()
