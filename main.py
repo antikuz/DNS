@@ -4,6 +4,7 @@ from zipfile import ZipFile
 import sqlite3
 import xlrd
 from DNSsql import SQLdb
+import promotion
 
 HOME = os.path.dirname(os.path.realpath(__file__))
 logging.basicConfig(level=logging.DEBUG,
@@ -18,6 +19,12 @@ logging.getLogger('').addHandler(console)
 
 
 def get_file():
+    """
+    for spb 
+    url = r'https://www.dns-shop.ru/files/price/price-spb.zip'
+    "Cookie": "city_path=spb",
+
+    """
     url = r'https://www.dns-shop.ru/files/price/price-norilsk.zip'
     headers = {
         "Host": "www.dns-shop.ru",
@@ -37,8 +44,11 @@ def get_file():
     timeformat = '%a, %d %b %Y %H:%M:%S %Z'
     time_new_file = time.mktime(time.strptime(datefile, timeformat))
     if time_new_file > time_last_file:
-        time_file = time.strftime('%d.%m.%y', time.localtime(time_last_file))
-        shutil.move(f'{HOME}\\price-norilsk.zip', f'{HOME}\\archive\\price-norilsk {time_file}.zip')
+        time_file = time.strftime('%y.%m.%d', time.localtime(time_last_file))
+        if os.path.exists(f'{HOME}\\archive\\price-norilsk {time_file}.zip'):
+            shutil.move(f'{HOME}\\price-norilsk.zip', f'{HOME}\\archive\\price-norilsk {time_file}_2.zip')
+        else:
+            shutil.move(f'{HOME}\\price-norilsk.zip', f'{HOME}\\archive\\price-norilsk {time_file}.zip')
         r = requests.get(url, headers=headers)
 
         with open(f'{HOME}\\price-norilsk.zip', 'wb') as zipfh:
@@ -82,7 +92,16 @@ def parse_xls_sheet(db, sheet, update_time):
     products = dict()
     for row in range(sheet.nrows):
         product_id = sheet.cell(row, 0).value
-
+        if product_id == 'Код':
+            magazinColumns = []
+            for _ in range(0, sheet.ncols):
+                cell = sheet.cell(row, _).value
+                if len(str(cell)) == 2 and str(cell).startswith('М'):
+                    magazinColumns.append(_)
+                if cell == 'Цена, руб':
+                    priceColumn = _
+                if cell == 'Бонусы':
+                    bonusColumn = _
         try:
             product_id = int(product_id)
         except ValueError:
@@ -90,11 +109,11 @@ def parse_xls_sheet(db, sheet, update_time):
 
         product_name = sheet.cell(row, 1).value
         available_in_stores = ''
-        for _ in range(2,6):
+        for _ in magazinColumns:
             available_in_stores += sheet.cell(row, _).value
 
-        product_price = int(sheet.cell(row, 6).value)
-        product_bonuses = int(sheet.cell(row, 7).value)
+        product_price = int(sheet.cell(row, priceColumn).value)
+        product_bonuses = int(sheet.cell(row, bonusColumn).value)
         product_promo_bonuses = 0
         products[product_id] = {
             'name': product_name, 
@@ -147,12 +166,14 @@ def best_offers(min_profit=None):
 
 def main():
     try:
-
         if get_file():
             logging.info('Get new database from dns-shop, parse data')
             parse_xls_book()
-        else:
+            logging.info('Check promotions')
+            promotion.main()
+            logging.info('Generate new offers')
             best_offers(min_profit=10)
+        else:
             logging.info('New file nothing changes')
             """
             wait for next check, probably 1 hour
@@ -162,4 +183,6 @@ def main():
         logging.error(err)
 
 
-main()
+if __name__ == "__main__":
+    with SQLdb() as db:
+        db.clean_promo()
