@@ -42,6 +42,7 @@ class SQLdb():
         self.insbonus = 0
         self.histcount = 0
         self.promocount = 0
+        self.promoclean = 0
 
     def close_db(self):
         self.db.close()
@@ -53,6 +54,8 @@ class SQLdb():
             logging.info(f'We have inserted {self.insbonus} promo records')
         if self.promocount:
             logging.info(f'We have updated {self.promocount} promo bonus records')
+        if self.promoclean:
+            logging.info(f'We have clean {self.promoclean} promo bonus records')
 
     def insert_products(self, product_list, price_history):
         products = []
@@ -113,13 +116,25 @@ class SQLdb():
         expire_promo = self.cursor.fetchall()
         if not expire_promo:
             return
-        for _id, products in zip(*expire_promo):
+        for product_fetch in expire_promo:
+            _id, products = product_fetch
             products = products.split(',')
             if products:
                 self.cursor.execute(f'UPDATE products SET bonus_promo = 0 WHERE id in ({",".join(products)})')
+                self.promoclean += self.cursor.rowcount
             self.cursor.execute(f'DELETE FROM promo WHERE id = "{_id}"')
             self.db.commit()
 
+    def price_history(self, id):
+        self.cursor.execute(f'SELECT price, up_date FROM price_history WHERE id_product = {int(id)}')
+        price_hist = self.cursor.fetchall()
+        self.cursor.execute(f'SELECT name FROM products WHERE id = {int(id)}')
+        name = self.cursor.fetchone()
+        if name:
+            name = name[0]
+        return name, price_hist
+
+        
     def __enter__(self):
         return self
     
