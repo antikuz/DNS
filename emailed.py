@@ -38,7 +38,7 @@ html_end = '''
 </html>'''
 with open('temp\\result.csv', 'r') as fh:
     file = fh.readlines()
-    for line in file[1:]:
+    for line in file[2:]:
         objects = line.split(';')
         html += f'''  <tr>
     <th class="column1">{objects[0]}</th>
