@@ -1,10 +1,9 @@
-
 import requests
 from bs4 import BeautifulSoup
 import time
 import re
 from DNSsql import SQLdb
-
+import logging
 
 def promotion_page():
     url = r'https://www.dns-shop.ru/actions/#'
@@ -76,20 +75,21 @@ def convert_promo_dates(text):
         'декабря': '12'
     }
     if len(text) == 7 :
-        start = f'{year}.{months[text[4]]}.{text[1]}'
-        end =  f'{year}.{months[text[4]]}.{text[3]}'
+        start = f'{year}.{months[text[4]]}.{text[1].zfill(2)}'
+        end =  f'{year}.{months[text[4]]}.{text[3].zfill(2)}'
     elif len(text) == 8:
-        start = f'{year}.{months[text[2]]}.{text[1]}'
-        end =  f'{year}.{months[text[5]]}.{text[4]}'
+        start = f'{year}.{months[text[2]]}.{text[1].zfill(2)}'
+        end =  f'{year}.{months[text[5]]}.{text[4].zfill(2)}'
     else:
-        start = f'{text[3][-2:]}.{months[text[2]]}.{text[1]}'
-        end = f'{text[-2][-2:]}.{months[text[-3]]}.{text[-4]}'
-    
+        start = f'{text[3][-2:]}.{months[text[2]]}.{text[1].zfill(2)}'
+        end = f'{text[-2][-2:]}.{months[text[-3]]}.{text[-4].zfill(2)}'
+
     return start, end
 
 
 def main():
     with SQLdb() as db:
+        db.clean_promo()
         db_promotions = db.get_promotions()
     soup = BeautifulSoup(promotion_page(), 'html.parser')
     promotions = soup.find('div', class_='actions-page__actions')
@@ -111,11 +111,10 @@ def main():
         except TypeError:
             continue
 
-        percent = re.search(r'или (\d+)%', description)
+        percent = re.search(r'или .*(\d+)%', description)
         if percent:
             percent = int(percent[1])
         else:
-            print(' процент не найден')
             continue
 
         products = parse_promo_products(link)
@@ -131,6 +130,3 @@ def main():
         with SQLdb() as db:
             db.insert_promo((id_promo, name, description, start_date, expires_date, products_id))
             db.update_promo(products_update)
-
-
-main()
